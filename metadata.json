@@ -1,0 +1,5 @@
+{
+  "name": "Drug Variety Manager",
+  "description": "A management system for grouping same-variety drugs with role-based access, application workflows, and approval processes.",
+  "requestFramePermissions": []
+}
