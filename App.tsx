@@ -184,7 +184,10 @@ function App() {
           )}
 
           {activeTab === 'application' && role !== 'COMPLIANCE' && (
-            <ApplicationForm onSubmit={handleSubmitApplication} />
+            <ApplicationForm 
+              onSubmit={handleSubmitApplication} 
+              applications={applications}
+            />
           )}
 
           {activeTab === 'approval' && role === 'COMPLIANCE' && (
