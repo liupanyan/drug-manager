@@ -39,11 +39,12 @@ function App() {
     strategy: 'NEW' | 'MERGE', 
     targetGroupId: string | undefined,
     finalProductIds: string[],
-    finalMainId: string
+    finalMainId: string,
+    comment?: string
   ) => {
     // 1. Update Application Status
     setApplications(apps => apps.map(a => 
-      a.id === app.id ? { ...a, status: 'APPROVED' } : a
+      a.id === app.id ? { ...a, status: 'APPROVED', reviewComment: comment } : a
     ));
 
     // 2. Update Drug Groups Logic
@@ -74,9 +75,9 @@ function App() {
     alert(`申请已批准！已${strategy === 'NEW' ? '创建新关联组' : '更新现有关联组'}。`);
   };
 
-  const handleRejectApplication = (appId: string) => {
+  const handleRejectApplication = (appId: string, reason: string) => {
     setApplications(apps => apps.map(a => 
-      a.id === appId ? { ...a, status: 'REJECTED' } : a
+      a.id === appId ? { ...a, status: 'REJECTED', reviewComment: reason } : a
     ));
     alert('申请已拒绝。');
   };
@@ -187,6 +188,7 @@ function App() {
             <ApplicationForm 
               onSubmit={handleSubmitApplication} 
               applications={applications}
+              drugGroups={drugGroups}
             />
           )}
 

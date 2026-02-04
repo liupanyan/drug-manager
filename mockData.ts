@@ -24,6 +24,8 @@ export const MOCK_PRODUCT_DB: Record<string, ProductDetail> = {
 export const INITIAL_APPLICATIONS: Application[] = [
   {
     id: 'sub-1',
+    type: 'LINK',
+    subject: '维生素C同品种关联',
     applicant: '张三',
     submittedAt: '2024/2/3 16:00:00',
     status: 'PENDING',

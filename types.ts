@@ -18,13 +18,17 @@ export interface DrugGroup {
 }
 
 export type ApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ApplicationType = 'LINK' | 'UNBIND';
 
 export interface Application {
   id: string;
+  type: ApplicationType;
+  subject: string; // New field: 申请事项
   applicant: string;
   submittedAt: string;
   status: ApplicationStatus;
   productIds: string[];
   reason: string;
   images: string[]; // placeholder for image URLs
+  reviewComment?: string; // Approval or Rejection feedback
 }

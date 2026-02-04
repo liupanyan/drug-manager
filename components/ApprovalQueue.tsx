@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Application, ProductDetail, DrugGroup } from '../types';
 import { MOCK_PRODUCT_DB } from '../mockData';
-import { CheckCircle, XCircle, AlertTriangle, Info, X } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Info, X, Link, Unlink, Trash2 } from 'lucide-react';
 
 interface ApprovalQueueProps {
   applications: Application[];
@@ -11,9 +11,10 @@ interface ApprovalQueueProps {
     strategy: 'NEW' | 'MERGE', 
     targetGroupId: string | undefined, 
     finalProductIds: string[], 
-    finalMainId: string
+    finalMainId: string,
+    comment?: string
   ) => void;
-  onReject: (appId: string) => void;
+  onReject: (appId: string, reason: string) => void;
 }
 
 export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({ 
@@ -22,19 +23,6 @@ export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({
   onApprove, 
   onReject 
 }) => {
-  // Simulating fetched details based on IDs in the application
-  const getProductDetails = (ids: string[]): ProductDetail[] => {
-    return ids.map(id => MOCK_PRODUCT_DB[id] || {
-      id,
-      name: '未知商品',
-      brand: '未知',
-      spec: '-',
-      rxType: 'OTC',
-      approvalNo: '-',
-      manufacturer: '-'
-    });
-  };
-
   const pendingApps = applications.filter(app => app.status === 'PENDING');
 
   if (pendingApps.length === 0) {
@@ -52,14 +40,13 @@ export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({
         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
           📄 待审批申请
         </h2>
-        <span className="text-sm text-gray-500">当前有 {pendingApps.length} 个待处理的关联申请</span>
+        <span className="text-sm text-gray-500">当前有 {pendingApps.length} 个待处理的申请</span>
       </div>
 
       {pendingApps.map(app => (
         <ApprovalCard 
           key={app.id} 
           app={app} 
-          details={getProductDetails(app.productIds)}
           existingGroups={existingGroups}
           onApprove={onApprove}
           onReject={onReject}
@@ -71,17 +58,17 @@ export const ApprovalQueue: React.FC<ApprovalQueueProps> = ({
 
 const ApprovalCard: React.FC<{
   app: Application;
-  details: ProductDetail[];
   existingGroups: DrugGroup[];
   onApprove: (
     app: Application, 
     strategy: 'NEW' | 'MERGE', 
     targetGroupId: string | undefined, 
     finalProductIds: string[], 
-    finalMainId: string
+    finalMainId: string,
+    comment?: string
   ) => void;
-  onReject: (appId: string) => void;
-}> = ({ app, details, existingGroups, onApprove, onReject }) => {
+  onReject: (appId: string, reason: string) => void;
+}> = ({ app, existingGroups, onApprove, onReject }) => {
   // Modal States
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -100,6 +87,57 @@ const ApprovalCard: React.FC<{
     targetGroup?: DrugGroup;
     groupName: string;
   } | null>(null);
+
+  // Helper to fetch details
+  const getProductDetail = (id: string): ProductDetail => {
+    return MOCK_PRODUCT_DB[id] || {
+      id,
+      name: '未知商品',
+      brand: '未知',
+      spec: '-',
+      rxType: 'OTC',
+      approvalNo: '-',
+      manufacturer: '-'
+    };
+  };
+
+  // Determine what to display based on Application Type
+  // For Unbind: Show removed IDs + Main ID of the group they belong to (if found)
+  // For Link: Show just the IDs in the app
+  const getDisplayDetails = () => {
+    const idsToShow = new Set<string>(app.productIds);
+    let contextMainId = '';
+
+    if (app.type === 'UNBIND') {
+        // Find the group these products belong to
+        const group = existingGroups.find(g => g.productIds.some(pid => app.productIds.includes(pid)));
+        if (group) {
+            idsToShow.add(group.id);
+            contextMainId = group.id;
+        }
+    }
+
+    const details = Array.from(idsToShow).map((id: string) => {
+        const d = getProductDetail(id);
+        return { ...d, isContextMain: id === contextMainId && app.type === 'UNBIND' };
+    });
+
+    // Sort Logic
+    if (app.type === 'UNBIND') {
+        // Sort: Requested items (in app.productIds) first, then others (e.g. Main ID)
+        details.sort((a, b) => {
+             const aIsTarget = app.productIds.includes(a.id);
+             const bIsTarget = app.productIds.includes(b.id);
+             if (aIsTarget && !bIsTarget) return -1;
+             if (!aIsTarget && bIsTarget) return 1;
+             return 0;
+        });
+    }
+
+    return details;
+  };
+
+  const displayDetails = getDisplayDetails();
 
   // Helper to parse IDs from text input
   const getCleanIds = (str: string) => {
@@ -122,20 +160,23 @@ const ApprovalCard: React.FC<{
     let foundGroup: DrugGroup | undefined;
     
     // Check if any ID is already in a group
-    for (const detail of details) {
-      foundGroup = existingGroups.find(g => g.productIds.includes(detail.id));
+    for (const pid of app.productIds) {
+      foundGroup = existingGroups.find(g => g.productIds.includes(pid));
       if (foundGroup) break;
     }
 
     const sortedIds = [...app.productIds].sort((a, b) => parseInt(a) - parseInt(b));
-    const mainProduct = details.find(d => d.id === sortedIds[0]);
+    const mainProduct = getProductDetail(sortedIds[0]);
 
     let finalIds: string[] = [];
     let initialMainId = '';
 
     if (foundGroup) {
-      // Merge Strategy
-      finalIds = Array.from(new Set([...foundGroup.productIds, ...app.productIds])).sort((a, b) => parseInt(a) - parseInt(b));
+      // Merge Strategy (or Unbind from existing)
+      // Logic: Start with existing group IDs combined with new ones (standard merge)
+      // For Unbind: The Compliance officer must manually remove IDs from the textarea.
+      // We load the FULL group list into the editor so they can remove specific ones.
+      finalIds = Array.from(new Set([...foundGroup.productIds, ...app.productIds])).sort((a: string, b: string) => parseInt(a) - parseInt(b));
       initialMainId = foundGroup.id;
       
       setAnalysis({
@@ -168,7 +209,8 @@ const ApprovalCard: React.FC<{
       const finalMainId = getEffectiveMainId(mainIdMode, customMainId, editIdsStr);
 
       if (finalIds.length < 2) {
-        alert("关联商品ID至少需要2个");
+        alert("关联商品ID至少需要2个 (如果是解绑导致剩余不足2个，建议直接删除分组)");
+        // In a real app, we might handle "Delete Group" here if count < 2.
         return;
       }
       
@@ -177,7 +219,7 @@ const ApprovalCard: React.FC<{
         return;
       }
 
-      onApprove(app, analysis.strategy, analysis.targetGroup?.id, finalIds, finalMainId);
+      onApprove(app, analysis.strategy, analysis.targetGroup?.id, finalIds, finalMainId, approveComment);
       setShowApproveModal(false);
     }
   };
@@ -187,7 +229,7 @@ const ApprovalCard: React.FC<{
       alert("请填写拒绝原因");
       return;
     }
-    onReject(app.id);
+    onReject(app.id, rejectReason);
     setShowRejectModal(false);
     setRejectReason('');
   };
@@ -251,21 +293,30 @@ const ApprovalCard: React.FC<{
 
             <div className="px-6 py-4">
               {/* Info Banner */}
-              <div className={`flex items-start gap-3 p-3 rounded-lg border mb-5 ${
-                analysis.strategy === 'NEW' 
-                  ? 'bg-blue-50 border-blue-100 text-blue-800'
-                  : 'bg-yellow-50 border-yellow-100 text-yellow-800'
-              }`}>
-                <div className="mt-0.5">
-                  {analysis.strategy === 'NEW' ? <Info size={16} /> : <AlertTriangle size={16} />}
+              {(app.type === 'LINK' || analysis.strategy === 'NEW') && (
+                <div className={`flex items-start gap-3 p-3 rounded-lg border mb-5 ${
+                  analysis.strategy === 'NEW' 
+                    ? 'bg-blue-50 border-blue-100 text-blue-800'
+                    : 'bg-yellow-50 border-yellow-100 text-yellow-800'
+                }`}>
+                  <div className="mt-0.5">
+                    {analysis.strategy === 'NEW' ? <Info size={16} /> : <AlertTriangle size={16} />}
+                  </div>
+                  <div className="text-sm">
+                    {analysis.strategy === 'NEW' 
+                      ? '检测到新关联组，请确认商品ID列表。'
+                      : `检测到部分商品已存在于关联组 "${analysis.groupName}"，列表已合并。`
+                    }
+                  </div>
                 </div>
-                <div className="text-sm">
-                  {analysis.strategy === 'NEW' 
-                    ? '检测到新关联组，请确认商品ID列表。'
-                    : `检测到部分商品已存在于关联组 "${analysis.groupName}"，列表已合并。`
-                  }
-                </div>
-              </div>
+              )}
+              
+              {app.type === 'UNBIND' && (
+                  <div className="bg-orange-50 border border-orange-100 text-orange-800 p-3 rounded-lg mb-5 text-sm flex gap-2">
+                      <Unlink size={16} className="shrink-0 mt-0.5"/>
+                      此为解除申请，请在下方列表中手动删除拟解除的ID。
+                  </div>
+              )}
 
               {/* Editable Fields */}
               <div className="space-y-4">
@@ -361,11 +412,25 @@ const ApprovalCard: React.FC<{
 
       {/* --- Main Card Content --- */}
       <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-        <div>
-          <h3 className="text-base font-bold text-gray-800">申请 #{app.id}</h3>
-          <p className="text-xs text-gray-500 mt-1">
-            申请人: {app.applicant} | 提交时间: {app.submittedAt}
-          </p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+                {app.subject}
+                <span className="text-xs font-normal text-gray-400">#{app.id}</span>
+            </h3>
+            <p className="text-xs text-gray-500 mt-1">
+                申请人: {app.applicant} | 提交时间: {app.submittedAt}
+            </p>
+          </div>
+          {app.type === 'UNBIND' ? (
+              <span className="bg-orange-50 text-orange-600 border border-orange-200 px-2 py-0.5 rounded text-xs flex items-center gap-1">
+                  <Unlink size={12}/> 解除申请
+              </span>
+          ) : (
+              <span className="bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded text-xs flex items-center gap-1">
+                  <Link size={12}/> 关联
+              </span>
+          )}
         </div>
         <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-semibold border border-orange-200">
           待审核
@@ -379,23 +444,52 @@ const ApprovalCard: React.FC<{
         
         {/* Product Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-          {details.map((item) => (
-            <div key={item.id} className="border border-gray-200 rounded-lg p-4 text-sm hover:shadow-md transition-shadow bg-white">
-              <div className="flex justify-between items-start mb-2">
-                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-mono">{item.id}</span>
-                <span className={`text-xs px-2 py-0.5 rounded border ${item.rxType === 'OTC' ? 'border-green-200 text-green-700 bg-green-50' : 'border-red-200 text-red-700 bg-red-50'}`}>
-                  {item.rxType}
-                </span>
+          {displayDetails.map((item: any) => {
+            const isRemovalTarget = app.type === 'UNBIND' && app.productIds.includes(item.id);
+            return (
+              <div 
+                  key={item.id} 
+                  className={`border rounded-lg p-3 text-sm hover:shadow-md transition-shadow bg-white ${
+                      item.isContextMain ? 'border-orange-300 bg-orange-50/30' : 
+                      (isRemovalTarget ? 'border-red-300 bg-red-50/20' : 'border-gray-200')
+                  }`}
+              >
+                <div className="flex items-center gap-2 mb-2 w-full overflow-hidden">
+                   {/* ID */}
+                   <span className={`px-1.5 py-0.5 rounded text-xs font-mono border flex items-center gap-1 shrink-0 ${
+                      item.isContextMain ? 'bg-orange-100 text-orange-700 border-orange-200 font-bold' : 'bg-gray-100 text-gray-600 border-gray-200'
+                   }`}>
+                      {item.id}
+                      {item.isContextMain && <span title="主ID">★</span>}
+                   </span>
+
+                   {/* Rx */}
+                   <span className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${
+                      item.rxType === 'OTC' ? 'border-green-200 text-green-700 bg-green-50' : 'border-red-200 text-red-700 bg-red-50'
+                   }`}>
+                      {item.rxType}
+                   </span>
+
+                   {/* Removal Label */}
+                   {isRemovalTarget && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-200 text-red-700 bg-red-50 shrink-0">
+                          拟解除
+                      </span>
+                   )}
+
+                   {/* Name */}
+                   <span className="font-bold text-gray-900 truncate" title={item.name}>{item.name}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-gray-600">
+                   <p className="truncate"><span className="text-gray-400">品牌:</span> {item.brand}</p>
+                   <p className="truncate"><span className="text-gray-400">规格:</span> {item.spec}</p>
+                   <p className="truncate col-span-2"><span className="text-gray-400">批文:</span> {item.approvalNo}</p>
+                   <p className="truncate col-span-2"><span className="text-gray-400">厂家:</span> {item.manufacturer}</p>
+                </div>
               </div>
-              <div className="font-bold text-gray-900 mb-1">{item.name}</div>
-              <div className="space-y-1 text-xs text-gray-600">
-                <p><span className="text-gray-400">品牌:</span> {item.brand}</p>
-                <p><span className="text-gray-400">规格:</span> {item.spec}</p>
-                <p><span className="text-gray-400">批文:</span> {item.approvalNo}</p>
-                <p><span className="text-gray-400">厂家:</span> {item.manufacturer}</p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-100">
@@ -409,7 +503,7 @@ const ApprovalCard: React.FC<{
             onClick={handlePreApprove}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
           >
-            <CheckCircle size={16} /> 批准 / 编辑关联
+            <CheckCircle size={16} /> 批准 / 编辑
           </button>
           <button 
             onClick={() => setShowRejectModal(true)}
