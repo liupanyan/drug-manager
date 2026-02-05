@@ -108,6 +108,24 @@ export const ApplicationForm: React.FC<ApplicationFormProps> = ({ onSubmit, appl
             return;
         }
 
+        // Logic check: Verify all IDs belong to the SAME group
+        const involvedGroupIds = new Set<string>();
+        for (const id of validIds) {
+            const group = drugGroups.find(g => g.productIds.includes(id));
+            if (group) {
+                involvedGroupIds.add(group.id);
+            }
+        }
+
+        if (involvedGroupIds.size > 1) {
+            showModal(
+                'error',
+                '提交失败',
+                '解除申请一次只能申请一个关联组内的子ID解除'
+            );
+            return;
+        }
+
         // Logic check: Cannot remove Main ID
         for (const id of validIds) {
           const group = drugGroups.find(g => g.id === id);
